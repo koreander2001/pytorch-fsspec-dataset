@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple
 
 from fsspec import AbstractFileSystem
@@ -8,12 +9,12 @@ from torchvision.datasets.folder import IMG_EXTENSIONS
 from torchvision.transforms.functional import pil_to_tensor
 
 
-class ImageStorageDataset(Dataset):
+class BaseStorageDataset(ABC, Dataset):
     def __init__(
         self,
         storage: AbstractFileSystem,
         root: str,
-        extensions: Tuple[str, ...] = IMG_EXTENSIONS,
+        extensions: Tuple[str, ...],
         transform: Optional[nn.Module] = None,
         device: str = "cpu",
     ):
@@ -31,8 +32,33 @@ class ImageStorageDataset(Dataset):
     def __getitem__(self, index) -> Tuple[str, Tensor]:
         path = self.paths[index]
 
-        with self.storage.open(path) as f, Image.open(f) as pil_image:
-            raw_image = pil_to_tensor(pil_image).to(self.device)
-        image = self.transform(raw_image)
+        raw_data = self.read(path).to(self.device)
+        data = self.transform(raw_data)
 
-        return path, image
+        return path, data
+
+    @abstractmethod
+    def read(self, path: str) -> Tensor:
+        pass
+
+
+class ImageStorageDataset(BaseStorageDataset):
+    def __init__(
+        self,
+        storage: AbstractFileSystem,
+        root: str,
+        extensions: Tuple[str, ...] = IMG_EXTENSIONS,
+        transform: Optional[nn.Module] = None,
+        device: str = "cpu",
+    ):
+        super().__init__(
+            storage=storage,
+            root=root,
+            extensions=extensions,
+            transform=transform,
+            device=device,
+        )
+
+    def read(self, path: str) -> Tensor:
+        with self.storage.open(path) as f, Image.open(f) as pil_image:
+            return pil_to_tensor(pil_image).to(self.device)
