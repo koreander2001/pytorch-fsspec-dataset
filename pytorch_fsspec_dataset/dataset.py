@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional, Tuple
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import List, Sequence, Tuple
 
 from fsspec import AbstractFileSystem
 from PIL import Image
@@ -9,21 +11,20 @@ from torchvision.datasets.folder import IMG_EXTENSIONS
 from torchvision.transforms.functional import pil_to_tensor
 
 
-class BaseStorageDataset(ABC, Dataset):
+class BaseStorageDataset(ABC, Dataset, Sequence):
     def __init__(
         self,
-        storage: AbstractFileSystem,
+        file_system: AbstractFileSystem,
         root: str,
         extensions: Tuple[str, ...],
-        transform: Optional[nn.Module] = None,
+        transform: nn.Module = nn.Identity(),
         device: str = "cpu",
     ):
-        self.storage = storage
+        self.file_system = file_system
         self.device = device
+        self.transform = transform.to(self.device)
 
-        self.transform = (transform if transform else nn.Sequential()).to(self.device)
-
-        all_paths: List[str] = storage.ls(root, detail=False)
+        all_paths: List[str] = self.file_system.ls(root, detail=False)
         self.paths = [p for p in all_paths if p.lower().endswith(extensions)]
 
     def __len__(self):
@@ -45,20 +46,16 @@ class BaseStorageDataset(ABC, Dataset):
 class ImageStorageDataset(BaseStorageDataset):
     def __init__(
         self,
-        storage: AbstractFileSystem,
+        file_system: AbstractFileSystem,
         root: str,
         extensions: Tuple[str, ...] = IMG_EXTENSIONS,
-        transform: Optional[nn.Module] = None,
+        transform: nn.Module = nn.Identity(),
         device: str = "cpu",
     ):
-        super().__init__(
-            storage=storage,
-            root=root,
-            extensions=extensions,
-            transform=transform,
-            device=device,
-        )
+        super().__init__(file_system, root, extensions, transform, device)
 
     def read(self, path: str) -> Tensor:
-        with self.storage.open(path) as f, Image.open(f) as pil_image:
-            return pil_to_tensor(pil_image).to(self.device)
+        with TemporaryDirectory() as temp_dir:
+            local_path = str(Path(temp_dir) / Path(path).name)
+            self.file_system.get_file(path, local_path)
+            return pil_to_tensor(Image.open(local_path))
